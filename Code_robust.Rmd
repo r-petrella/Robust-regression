@@ -1,0 +1,203 @@
+---
+title: "code_robust"
+author: "Riccardo Petrella"
+date: "2024-02-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Robust statistics 
+## Robust Standardization 
+```{r}
+library(robustbase)
+################
+#### edit with your data ####
+################
+
+oliveoil <- read.table("oliveoil.dat",header=TRUE)
+olive <- oliveoil[,3:10]
+
+data <- olive 
+################
+
+#### Median and MAD ####
+centers <- apply(data, 2, median)
+scales <- apply(data, 2, mad)
+data_centered <- sweep(data, 2, centers)
+data_st <- sweep(data_centered, 2, scales, FUN = "/")
+head(data_st)
+
+#### Huber ####
+cent_scal <- apply(data, 2, huberM)
+centers <- sapply(cent_scal, "[[", 1)
+scales <- sapply(cent_scal, "[[", 2)
+data_centered <- sweep(data, 2, centers)
+data_st <- sweep(data_centered, 2, scales, FUN = "/")
+head(data_st)
+```
+## Parameter estimation 
+
+### One variable 
+```{r}
+################
+#### edit with your data ####
+################
+
+data <- dortmund 
+variable <- data$birthdeath
+huber_const <- 1.5
+alpha <- 0.75                                           # For estimation of MCD (Minimum Covariance Determinant)
+################
+set.seed(12345)
+
+#### Preliminary analytics #### 
+## Location 
+mean(variable)
+sum(variable > mean(variable)) / length(variable)       # Proportion of observations above / below mean 
+median(variable) 
+
+## Scale 
+sd(variable)
+mad(variable, constant = 1.4826)
+
+
+## Outliers 
+which.min(variable)
+which.max(variable) 
+
+#### Robust statistics #### 
+huberM(variable, k = huber_const)
+```
+
+### Whole dataset 
+
+```{r}
+################
+#### edit with your data ####
+################
+
+
+data <- dortmund 
+alpha = 0.5
+
+var_1 <- 2              # Specify variables for visualization
+var_2 <- 4              # Specify variables for visualization
+################
+set.seed(12345)
+
+#### Preliminary analytics #### 
+## Location 
+colMeans(data)
+colMedians(as.matrix(data))
+
+## Scale 
+summary(data)
+
+## Correlation 
+cor(data[,var_1], data[,var_2])
+
+#### Robust Covariance + Location estimation #### 
+## Computation 
+mcd_obj <- covMcd(data, alpha = alpha) 
+
+## Location
+mcd_obj$center 
+mcd_obj$raw.center 
+
+## Covariance 
+str(mcd_obj$cov)
+str(mcd_obj$raw.cov)
+
+## Correlation
+mcd_obj$cov[var_1, var_2] / sqrt(mcd_obj$cov[var_1, var_1] * mcd_obj$cov[var_2, var_2])
+
+#### Visualize ####
+plot(data[,c(var_1, var_2)])
+## Non-robust
+ellipse(colMeans(data[,c(var_1, var_2)]), cov(data)[c(var_1, var_2), c(var_1, var_2)], alpha = 0.01)
+## Robust 
+ellipse(mcd_obj$center[c(var_1, var_2)], mcd_obj$cov[c(var_1, var_2), c(var_1, var_2)], col = 4, alpha = 0.01)
+```
+
+## Outlier Identification 
+
+Outliers by Mahalanobis distance can be 
+- Faulty measurements 
+- Correct but special 
+- Result from non-normality of the process 
+
+Its better to identify outliers from robust statistics which 
+are not effected by outliers. 
+
+**Important** 
+MCD gives different solutions, depending on the number of variables 
+it is computed. This is a main difference to Covariance matrix. 
+
+```{r}
+################
+#### edit with your data ####
+################
+data <- read.table("Dortmund_msbd.dat",header=TRUE,row.names=1) 
+alpha = 0.75
+outlier_level <- 0.99           # When to consider an observation as outlier, based on (normal) Mahanalobis distance 
+################
+set.seed(12345)
+
+#### Visualize #### 
+## Boxplot 
+boxplot(scale(data))
+
+## Mahalanobis distance 
+mcd_obj <- covMcd(data, alpha = alpha) 
+plot(1:nrow(data), sqrt(mcd_obj$mah), ylim = c(0, 30), type = "n", xlab = "Observation", ylab = "Robust Mahalanobis distance")
+text(1:nrow(data), sqrt(mcd_obj$mah), rownames(data), cex = 0.7) 
+abline(sqrt(qchisq(outlier_level, ncol(data) - 1)), 0, col = 2)
+```
+
+## Outliers in regression 
+
+Weights for each observation tell about the importance.
+If weight is zero for an observation, it is most certainly an outlier. 
+```{r}
+################
+#### edit with your data ####
+################
+data <- starsCYG  
+formula <- log.light ~ log.Te
+# data <- regdata2  
+# formula <- y ~ x1 + x2 + x3
+var_x <- 2                      # Variable of interest, y should be BEFORE x 
+var_y <- 1                      # Position of y in dataset 
+################ 
+set.seed(12345)
+
+pairs(data) 
+#### Non-robust regression ####
+## Computation 
+lm_norm <- lm(formula, data = data)
+summary(lm_norm)
+
+## Diagnostic plots 
+par(mfrow = c(2, 2))
+plot(lm_norm)
+par(mfrow = c(1, 1))
+
+## Visualize regression line 
+plot(data[, c(var_x, var_y)])
+abline(lm_norm$coef[1], lm_norm$coef[var_x])
+
+#### Robust regression #### 
+## Computation
+lm_rob <- lmrob(formula, data = data)                   # MM-estimator 
+lm_rob <- lmrob(formula, data = data, method = "S")   # S-estimator 
+
+## Diagnostic plots 
+summary(lm_rob)
+par(mfrow = c(2, 3))
+plot(lm_rob)
+plot(1:nrow(data), lm_rob$rweights, main = "Observation weights", xlab = "Obs. number", ylab = "Robustness weights")
+par(mfrow = c(1, 1))
+```
